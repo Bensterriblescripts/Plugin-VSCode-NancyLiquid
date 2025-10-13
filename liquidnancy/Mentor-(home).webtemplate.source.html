@@ -1,0 +1,36 @@
+{% include 'Lib (Core)' %}
+
+{% include 'Alerts (container)' %}
+{% assign flexbasis = "50px" %}
+{% assign flexgrowheader = "1" %}
+{% assign flexgrowbody = "6" %}
+{% assign pageheight = "100%" %}
+{% assign userid = user.id %}
+{% assign id = request.params['id'] %}
+{% include "Home (script)" %}
+{% include 'Mentor (enrolments-query)' %}
+{% include 'Mentor (visits-query)'%}
+<div class="wrapper-body" style="height: {{pageheight}}; display: flex; flex-direction: column;">
+    <section id="employer_tiles_section" class="mito-home-landing" style="flex-grow: {{flexgrowheader}}; flex-basis: {{flexbasis}};">
+        <div class="container" style="display:flex;flex-direction:row;">
+            <div class="col-xs-12 col-lg-9" style="padding:2px;">
+                {% include "Mentor (tiles) Inverted" %}
+            </div>
+            <div class="col-xs-12 col-md-6 col-lg-3 hidden-xs hidden-sm hidden-md" style="padding:2px;">
+                {% include "Employer (newsfeed)" %}
+            </div>
+        </div>
+    </section>
+    <section class="mito-home-body" style="flex-grow: {{flexgrowbody}}; min-height: 720px;">
+        <div class="container" >
+            <div class="col-xs-12 col-lg-9" >
+                {% block main %}
+                    {% include 'Employer (enrolments-list)' %}
+                {% endblock %}
+            </div>
+            <div class="col-xs-12 col-sm-6 col-lg-3">
+                {% include "Mentor (schedule)" %}
+            </div>
+        </div>
+    </section>
+</div>
