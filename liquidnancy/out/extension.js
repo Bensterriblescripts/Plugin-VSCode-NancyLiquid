@@ -40,7 +40,7 @@ let endPos;
 let matchRange;
 const varDecor = vscode.window.createTextEditorDecorationType({
     color: '#6fadccff',
-    fontWeight: 'bold',
+    fontWeight: 'italic',
 });
 const stringDecor = vscode.window.createTextEditorDecorationType({
     color: '#CE9178',
