@@ -5,33 +5,39 @@ let endPos: vscode.Position;
 let matchRange: vscode.Range;
 
 const varDecor = vscode.window.createTextEditorDecorationType({
-    color: '#6fadccff',
+    color: '#9bc4d8ff',
     fontWeight: 'italic',
 });
 const stringDecor = vscode.window.createTextEditorDecorationType({
-    color: '#CE9178',
+    color: '#c9856aff',
 });
 const objDecor = vscode.window.createTextEditorDecorationType({
     color: '#9cd790ff',
 });
 
 const liquidDecor = vscode.window.createTextEditorDecorationType({
-    color: '#569CD6',
+    color: '#9ea8afff',
 });
 const liquidTagDecor = vscode.window.createTextEditorDecorationType({
     color: '#9ea8afff',
+});
+const htmlTagDecor = vscode.window.createTextEditorDecorationType({
+    color: '#4da6d3ff',
 });
 
 const re_include = /\binclude\s+['"]([^'"]+)['"]/i;
 const re_block = /\b(block)\s+([a-zA-Z_][\w]*)/i;
 const re_endblock = /\bendblock\b/i;
 const re_assign = /\b(assign)\s+([a-zA-Z_][\w]*)\s*=\s*(.+)/i;
-const re_if = /\b(if)\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*(?:==|!=|>|<|>=|<=|contains|and|or)\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*|'[^']*'|"[^"]*")/i;
+const re_if = /\b(?<if>if|elsif)\s+(?<left>.*)\s*(?<operator>==|!=|>|<|>=|<=|contains|and|or)\s*(?<right>.*)\s*/i;
+const re_ifbool = /\b(?<if>if|elsif)\s+(?<left>.*)\s*(?<right>.*)\s*/i;
+
 const re_endif = /\bendif\b/i;
 
-const re_number = /^\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*$/;
-const re_string = /^\s*(["'])(?:\\.|(?!\1).)*\1\s*$/;
-const re_object = /^\s*(?:this|[A-Za-z_]\w*)(?:\.[A-Za-z_]\w*)+\s*$/;
+const re_number = /^\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*$/i;
+const re_string = /^\s*(["'])(?:\\.|(?!\1).)*\1\s*$/i;
+const re_object = /^\s*(?:this|[A-Za-z_]\w*)(?:\.[A-Za-z_]\w*)+\s*$/i;
+const re_bool = /^\s*(?:<bool>true|false|True|False)\s*/i;
 
 let variables: {[key: string]: string} = { 
     "user": "Object", "user.id": "String",
@@ -70,6 +76,8 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
     const liquidDecorations: vscode.DecorationOptions[] = [];
     const liquidTagDecorations: vscode.DecorationOptions[] = [];
 
+    const htmlDecorations: vscode.DecorationOptions[] = [];
+
     let tagcount = 0;
     let currenttag: vscode.Range;
 
@@ -80,7 +88,11 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
 
     /* Core Function */
     function checkLine(line: string, linenum: number) {
+        let match: RegExpMatchArray | null;
         let skipcount = 0;
+
+        let elementstart = -1;
+        let outercontent = [];
 
         let liquidstart = -1;
         let liquidcontents = [];
@@ -115,12 +127,31 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
                         liquidDecorations.push({ range: matchRange});
 
                         liquidtagstart = x;
-                        
-                    } else {
-                        // HTML/JS Stuff goes here
+                        continue;
                     }
                 }
-            }  else {
+
+                if (elementstart === -1) {
+                    if (char === '<') { // Element Starts
+                        elementstart = x;
+                        if (nextchar === 'd' && line[nextlocation + 1] === 'i' && line[nextlocation + 2] === 'v') {
+                            skipcount = 3;
+                            startPos = new vscode.Position(linenum, x);
+                            endPos = new vscode.Position(linenum, nextlocation + 3);
+                            matchRange = new vscode.Range(startPos, endPos);
+                            htmlDecorations.push({ range: matchRange });
+                        }
+                        continue;
+                    }
+                } else if (elementstart !== -1) {
+                    if (char === '>') { // Element Ends
+                        elementstart = -1;
+                    } else {
+                        outercontent.push(char);
+                    }
+                }
+
+            }  else if (liquidstart !== -1) {
 
                 /*** Inside a Liquid Tag ***/
 
@@ -176,54 +207,85 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
                             startPos = new vscode.Position(linenum, rightStart);
                             endPos = new vscode.Position(linenum, rightStart + match[3].length + 1); 
                             matchRange = new vscode.Range(startPos, endPos); 
-                            if (variables[match[2]] === 'Object') {
-                                objDecorations.push({range: matchRange, hoverMessage: "Type: " + "Object" });
-                            } else if (variables[match[2]] === "Any") {
-                                objDecorations.push({range: matchRange, hoverMessage: "Type: " + "Any" });
-                            }
 
                         }
-                    } else if (match = re_if.exec(liquidtag)) { // If Operation
-                        if (match[1] && match[2] && match[3]) {
+                    } else if (match = re_if.exec(liquidtag)) { // If (X Operator Y)
+                        if (match?.groups) {
 
                             // "if"
-                            const ifStart = liquidstart + match[0].indexOf(match[1]) + 1;
+                            const ifStart = liquidstart + match[0].indexOf(match.groups.if) + 1;
                             startPos = new vscode.Position(linenum, ifStart);
-                            endPos = new vscode.Position(linenum, ifStart + match[1].length); 
+                            endPos = new vscode.Position(linenum, ifStart + match.groups.if.length); 
                             matchRange = new vscode.Range(startPos, endPos); 
                             liquidTagDecorations.push({ range: matchRange });
 
                             // Left Operand
-                            const leftStart = liquidstart + match[0].indexOf(match[2]) + 1;
+                            const leftStart = liquidstart + match[0].indexOf(match.groups.left);
                             startPos = new vscode.Position(linenum, leftStart);
                             const leftStartPos = startPos;
-                            endPos = new vscode.Position(linenum, leftStart + match[2].length); 
-                            matchRange = new vscode.Range(startPos, endPos); 
-                            varDecorations.push({ range: matchRange, hoverMessage: "Type: " + variables[match[2]] });
-                            if (!variables[match[2]]) {
-                                const diagnostic = new vscode.Diagnostic(matchRange, 'Unable to locate'+match[3]+' in this template', vscode.DiagnosticSeverity.Information);
+                            endPos = new vscode.Position(linenum, leftStart + match.groups.left.length); 
+                            matchRange = new vscode.Range(startPos, endPos);
+
+
+                            match.groups.left = match.groups.left.trim();
+                            let leftType = "";
+                            if (variables[match.groups.left]) {
+                                varDecorations.push({ range: matchRange, hoverMessage: "Type: " + variables[match.groups.left] });
+                                leftType = variables[match.groups.left];
+                            } else if (re_string.test(match.groups.left)) {
+                                varDecorations.push({ range: matchRange, hoverMessage: "Type: String"});
+                                leftType = "String";
+                            } else if (re_number.test(match.groups.left)) {
+                                varDecorations.push({ range: matchRange, hoverMessage: "Type: Number" });
+                                leftType = "Number";
+                            } else if (re_object.test(match.groups.left)) {
+                                varDecorations.push({ range: matchRange, hoverMessage: "Type: Object" });
+                                leftType = "Object";
+                            } else if (re_bool.test(match.groups.left)) {
+                                varDecorations.push({ range: matchRange, hoverMessage: "Type: Object" });
+                                leftType = "Boolean";
+                            } else {
+                                const diagnostic = new vscode.Diagnostic(matchRange, 'Incorrect Left Assignment', vscode.DiagnosticSeverity.Error);
                                 diagnostics.push(diagnostic);
                             }
 
                             // Right Operand
-                            const rightStart = liquidstart + match[0].lastIndexOf(match[3]) + 1;
+                            const rightStart = liquidstart + match[0].lastIndexOf(match.groups.right) + 1;
                             startPos = new vscode.Position(linenum, rightStart);
-                            endPos = new vscode.Position(linenum, rightStart + match[3].length); 
+                            endPos = new vscode.Position(linenum, rightStart + match.groups.right.length); 
                             const rightEndPos = endPos;
                             matchRange = new vscode.Range(startPos, endPos); 
-                            varDecorations.push({ range: matchRange, hoverMessage: "Type: " + variables[match[3]] });
-                            if (!variables[match[3]]) {
-                                const diagnostic = new vscode.Diagnostic(matchRange, 'Unable to locate '+match[3]+' in this template', vscode.DiagnosticSeverity.Information);
+
+                            match.groups.right = match.groups.right.trim();
+                            let rightType = "";
+                            if (variables[match.groups.right]) {
+                                varDecorations.push({ range: matchRange, hoverMessage: "Type: " + variables[match.groups.right] });
+                                rightType = variables[match.groups.right];
+                            } else if (re_string.test(match.groups.right)) {
+                                varDecorations.push({ range: matchRange, hoverMessage: "Type: String"});
+                                rightType = "String";
+                            } else if (re_number.test(match.groups.right)) {
+                                varDecorations.push({ range: matchRange, hoverMessage: "Type: Number" });
+                                rightType = "Number";
+                            } else if (re_object.test(match.groups.right)) {
+                                varDecorations.push({ range: matchRange, hoverMessage: "Type: Object" });
+                                rightType = "Object";
+                            } else if (re_bool.test(match.groups.right)) {
+                                varDecorations.push({ range: matchRange, hoverMessage: "Type: Object" });
+                                leftType = "Boolean";
+                            } else {
+                                const diagnostic = new vscode.Diagnostic(matchRange, 'Incorrect Right Assignment', vscode.DiagnosticSeverity.Error);
                                 diagnostics.push(diagnostic);
                             }
 
-                            if (variables[match[2]] && variables[match[3]]) { // Type Operation Error
-                                if (variables[match[2]] !== "Any" && variables[match[3]] !== "Any" && variables[match[2]] !== "Object" && variables[match[3]] !== "Object") {
-                                    matchRange = new vscode.Range(leftStartPos, rightEndPos);
-                                    if (variables[match[2]] !== variables[match[3]]) {
-                                        const diagnostic = new vscode.Diagnostic(matchRange, `Invalid type operation, comparing ${match[2]} (${variables[match[2]]}) against ${match[3]} (${variables[match[3]]})` , vscode.DiagnosticSeverity.Error);
-                                        diagnostics.push(diagnostic);
-                                    }
+                            // Type Matching
+                            if (leftType !== "Object" && leftType !== "Any" && rightType !== "Object" && rightType !== "Any") {
+                                if (leftType !== rightType) {
+                                    startPos = new vscode.Position(linenum, liquidstart);
+                                    endPos = new vscode.Position(linenum, x);
+                                    matchRange = new vscode.Range(startPos, endPos);
+                                    const diagnostic = new vscode.Diagnostic(matchRange, `Invalid Type Operation ${match.groups.left} (${leftType}) and ${match.groups.right} (${rightType})`, vscode.DiagnosticSeverity.Error);
+                                    diagnostics.push(diagnostic);
                                 }
                             }
 
@@ -235,7 +297,22 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
                             }
                             tagcount++;
                         }
-                    } else if (re_endif.test(liquidtag)) {
+                    // } else if (match = re_ifbool.exec(liquidtag)) { // If Bool
+                    //     if (match?.groups) {
+                    //         match.groups.bool = match.groups.bool.trim();
+                    //         startPos = new vscode.Position(linenum, liquidstart);
+                    //         endPos = new vscode.Position(linenum, x);
+                    //         matchRange = new vscode.Range(startPos, endPos);
+
+                    //         if (match.groups.bool !== "false" && match.groups.bool !== "False" && match.groups.bool !== "true" && match.groups.bool !== "True" &&
+                    //             variables[match.groups.bool] !== "True" && variables[match.groups.bool] !== "true" && variables[match.groups.bool] !== "false" && variables[match.groups.bool] !== "False"
+                    //         )  {
+                    //             const diagnostic = new vscode.Diagnostic(matchRange, `Invalid Type. Variable is not a Boolean (${match.groups.bool})`, vscode.DiagnosticSeverity.Error);
+                    //             diagnostics.push(diagnostic);
+                    //         }
+                    //     }
+
+                    } else if (re_endif.test(liquidtag)) { // End If
                         startPos = new vscode.Position(linenum, liquidstart); 
                         endPos = new vscode.Position(linenum, x); 
                         matchRange = new vscode.Range(startPos, endPos); 
@@ -247,9 +324,9 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
                             startPos = new vscode.Position(linenum, liquidstart);
                             endPos = new vscode.Position(linenum, liquidstart + match[1].length + 1);
                             matchRange = new vscode.Range(startPos, endPos);
-                            liquidTagDecorations.push({ range: matchRange, hoverMessage: "Block Tag" });
+                            liquidTagDecorations.push({ range: matchRange });
                         }
-                    } else if (re_endblock.test(liquidtag)) {
+                    } else if (re_endblock.test(liquidtag)) { // End Block
                         startPos = new vscode.Position(linenum, liquidstart);
                         endPos = new vscode.Position(linenum, x);
                         matchRange = new vscode.Range(startPos, endPos);
@@ -313,6 +390,7 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
     editor.setDecorations(stringDecor, stringDecorations);
     editor.setDecorations(varDecor, varDecorations);
     editor.setDecorations(objDecor, objDecorations);
+    editor.setDecorations(htmlTagDecor, htmlDecorations);
 
     collection.set(document.uri, diagnostics);
 }
