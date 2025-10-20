@@ -109,6 +109,7 @@ const htmlDecorations = [];
 const nestedDecorations = {};
 let tagcount = 0;
 let nestStart;
+let nestEnd;
 function lintDocument(collection) {
     const editor = vscode.window.activeTextEditor;
     if (editor === undefined) {
@@ -125,6 +126,7 @@ function lintDocument(collection) {
     htmlDecorations.length = 0;
     tagcount = 0;
     nestStart = undefined;
+    nestEnd = undefined;
     for (let linenum = 0; linenum < document.lineCount; linenum++) {
         const line = document.lineAt(linenum).text;
         checkLine(line, linenum);
@@ -283,6 +285,7 @@ function lintDocument(collection) {
                             startPos = new vscode.Position(linenum, leftStart);
                             const leftStartPos = startPos;
                             endPos = new vscode.Position(linenum, leftStart + match.groups.left.length);
+                            const leftEndPos = endPos;
                             matchRange = new vscode.Range(startPos, endPos);
                             match.groups.left = match.groups.left.trim();
                             let leftType = "";
@@ -307,12 +310,13 @@ function lintDocument(collection) {
                                 leftType = "Object";
                             }
                             else {
-                                const diagnostic = new vscode.Diagnostic(matchRange, 'Incorrect Left Assignment', vscode.DiagnosticSeverity.Error);
+                                const diagnostic = new vscode.Diagnostic(matchRange, `Unknown Type for Left Operand (${match.groups.left})`, vscode.DiagnosticSeverity.Error);
                                 diagnostics.push(diagnostic);
                             }
                             // Right Operand
                             const rightStart = liquidstart + match[0].lastIndexOf(match.groups.right) + 1;
                             startPos = new vscode.Position(linenum, rightStart);
+                            const rightStartPos = startPos;
                             endPos = new vscode.Position(linenum, rightStart + match.groups.right.length);
                             const rightEndPos = endPos;
                             matchRange = new vscode.Range(startPos, endPos);
@@ -339,12 +343,12 @@ function lintDocument(collection) {
                                 rightType = "Object";
                             }
                             else {
-                                const diagnostic = new vscode.Diagnostic(matchRange, 'Incorrect Right Assignment', vscode.DiagnosticSeverity.Error);
+                                const diagnostic = new vscode.Diagnostic(matchRange, `Unknown Type for Right Operand (${match.groups.right})`, vscode.DiagnosticSeverity.Error);
                                 diagnostics.push(diagnostic);
                             }
                             // Type Matching
                             if (leftType !== "Object" && leftType !== "Any" && rightType !== "Object" && rightType !== "Any") {
-                                if (leftType !== rightType) {
+                                if (leftType !== rightType && rightType !== "" && leftType !== "") {
                                     startPos = new vscode.Position(linenum, liquidstart);
                                     endPos = new vscode.Position(linenum, x);
                                     matchRange = new vscode.Range(startPos, endPos);
@@ -387,6 +391,7 @@ function lintDocument(collection) {
                             matchRange = new vscode.Range(startPos, endPos);
                         }
                         tagcount--;
+                        nestEnd = matchRange;
                         if (!nestedDecorations[tagcount]) {
                             nestedDecorations[tagcount] = [];
                         }
@@ -451,8 +456,12 @@ function lintDocument(collection) {
             }
         }
     }
-    if (tagcount !== 0 && nestStart) {
+    if (tagcount > 0 && nestStart) {
         const diagnostic = new vscode.Diagnostic(nestStart, 'Unclosed `if` Tag', vscode.DiagnosticSeverity.Error);
+        diagnostics.push(diagnostic);
+    }
+    else if (tagcount < 0 && nestEnd) {
+        const diagnostic = new vscode.Diagnostic(nestEnd, 'Unnecessary `endif` Tag', vscode.DiagnosticSeverity.Error);
         diagnostics.push(diagnostic);
     }
     console.log("Variables: ", variables);

@@ -17,7 +17,6 @@
 <div class="wrapper-body" style="height: {{pageheight}}; display: flex; flex-direction: column;">
     <section id="employer_tiles_section" class="mito-home-landing" style="flex-grow: {{flexgrowheader}}; flex-basis: {{flexbasis}};">
         <div class="container" style="display:flex;flex-direction:row;">
-        {% if userid == integer1 %}
             {% if userid == "100" %}
             <div class="col-xs-12 col-lg-9" style="padding:2px;">
                 {% include "Mentor (tiles) Inverted" %}
@@ -26,6 +25,7 @@
                 {% include "Employer (newsfeed)" %}
             </div>
             {% endif %}
+
         {% endif %}
         </div>
     </section>
