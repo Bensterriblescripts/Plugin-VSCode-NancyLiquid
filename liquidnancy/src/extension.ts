@@ -22,40 +22,26 @@ const liquidTagDecor = vscode.window.createTextEditorDecorationType({
     color: '#9ea8afff',
 });
 const htmlTagDecor = vscode.window.createTextEditorDecorationType({
-    color: '#4da6d3ff',
+    color: '#318fbeff',
 });
-
-let nestingDecors: {[key: number]: vscode.TextEditorDecorationType} = {
-    0: vscode.window.createTextEditorDecorationType({
-        color: '#ac4dacff',
-    }),
-    1: vscode.window.createTextEditorDecorationType({
-        color: '#4dbeb9ff',
-    }),
-    2: vscode.window.createTextEditorDecorationType({
-        color: '#35c576ff',
-    }),
-    3: vscode.window.createTextEditorDecorationType({
-        color: '#4eb871ff',
-    }),
-    4: vscode.window.createTextEditorDecorationType({
-        color: '#9769ebff',
-    }),
-};
+const ifTagDecor = vscode.window.createTextEditorDecorationType({
+    color: '#9ea8afff',
+});
 
 const re_include = /\binclude\s+['"]([^'"]+)['"]/i;
 const re_block = /\b(block)\s+([a-zA-Z_][\w]*)/i;
 const re_endblock = /\bendblock\b/i;
 const re_assign = /\b(assign)\s+([a-zA-Z_][\w]*)\s*=\s*(.+)/i;
-const re_if = /\b(?<if>if|elsif)\s+(?<left>.*)\s*(?<operator>==|!=|>|<|>=|<=|contains|and|or)\s*(?<right>.*)\s*/i;
-const re_ifbool = /\b(?<if>if|elsif)\s+(?<left>.*)\s*(?<right>.*)\s*/i;
 
+const re_if = /\b(?<if>if|elsif)\s+(?<left>.*)\s*(?<operator>==|!=|>|<|>=|<=|contains|and|or)\s*(?<right>.*)\s*/i;
+const re_else = /\belse\b/i;
 const re_endif = /\bendif\b/i;
 
 const re_number = /^\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*$/i;
 const re_string = /^\s*(["'])(?:\\.|(?!\1).)*\1\s*$/i;
 const re_object = /^\s*(?:this|[A-Za-z_]\w*)(?:\.[A-Za-z_]\w*)+\s*$/i;
-const re_bool = /^\s*true|false|True|False\s*/i;
+const re_bool = /^\s*(?:true|false)\s*$/i;
+
 
 const re_htmltag = /^\S+/;
 
@@ -73,10 +59,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(diagnosticCollection);
 
     context.subscriptions.push(
-        vscode.workspace.onDidChangeTextDocument(_ => lintDocument(diagnosticCollection))
-    );
-    context.subscriptions.push(
-        vscode.workspace.onDidOpenTextDocument(_ => lintDocument(diagnosticCollection))
+        vscode.workspace.onDidChangeTextDocument(doc => lintDocument(doc, diagnosticCollection))
     );
 }
 
@@ -91,14 +74,14 @@ const liquidDecorations: vscode.DecorationOptions[] = [];
 const liquidTagDecorations: vscode.DecorationOptions[] = [];
 
 const htmlDecorations: vscode.DecorationOptions[] = [];
-const nestedDecorations: { [key: number]: vscode.DecorationOptions[] } = {};
+const ifTagDecorations: vscode.DecorationOptions[] = [];
 
 let tagcount = 0;
 let nestStart: vscode.Range | undefined;
 let nestEnd: vscode.Range | undefined;
 
-function lintDocument(collection: vscode.DiagnosticCollection) {
-    const editor = vscode.window.activeTextEditor;
+function lintDocument(doc: vscode.TextDocumentChangeEvent, collection: vscode.DiagnosticCollection) {
+    const editor = vscode.window.visibleTextEditors.find(ed => ed.document === (doc.document ?? vscode.window.activeTextEditor?.document));
     if (editor === undefined) {
         console.log("No editor found for the current document");
         return;
@@ -278,8 +261,7 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
                                 endPos = new vscode.Position(linenum, x);
                                 matchRange = new vscode.Range(startPos, endPos);
                             }
-                            if (!nestedDecorations[tagcount]) { nestedDecorations[tagcount] = []; }
-                            nestedDecorations[tagcount].push({ range: matchRange });
+                            ifTagDecorations.push({range: matchRange});
 
                             // Left Operand
                             const leftStart = liquidstart + match[0].indexOf(match.groups.left);
@@ -329,7 +311,7 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
                                 varDecorations.push({ range: matchRange, hoverMessage: "Type: Boolean" });
                                 rightType = "Boolean";
                             } else if (re_string.test(match.groups.right)) {
-                                varDecorations.push({ range: matchRange, hoverMessage: "Type: String"});
+                                stringDecorations.push({ range: matchRange, hoverMessage: "Type: String"});
                                 rightType = "String";
                             } else if (re_number.test(match.groups.right)) {
                                 varDecorations.push({ range: matchRange, hoverMessage: "Type: Number" });
@@ -337,7 +319,6 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
                             } else if (re_object.test(match.groups.right)) {
                                 varDecorations.push({ range: matchRange, hoverMessage: "Type: Object" });
                                 rightType = "Object";
-
                             } else {
                                 const diagnostic = new vscode.Diagnostic(matchRange, `Unknown Type for Right Operand (${match.groups.right})`, vscode.DiagnosticSeverity.Error);
                                 diagnostics.push(diagnostic);
@@ -345,16 +326,24 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
 
                             // Type Matching
                             if (leftType !== "Object" && leftType !== "Any" && rightType !== "Object" && rightType !== "Any") {
-                                if (leftType !== rightType && rightType !== "" && leftType !== "") {
+                                if (leftType !== rightType) {
                                     startPos = new vscode.Position(linenum, liquidstart);
                                     endPos = new vscode.Position(linenum, x);
                                     matchRange = new vscode.Range(startPos, endPos);
-                                    const diagnostic = new vscode.Diagnostic(matchRange, `Invalid type operation ${match.groups.left} (${leftType}) and ${match.groups.right} (${rightType})`, vscode.DiagnosticSeverity.Error);
+                                    const diagnostic = new vscode.Diagnostic(matchRange, `Mismatched type operation \`${match.groups.left}\` (${leftType}) and \`${match.groups.right}\` (${rightType})`, vscode.DiagnosticSeverity.Error);
+                                    diagnostics.push(diagnostic);
+                                } else if (rightType === "" || leftType === "") {
+                                    startPos = new vscode.Position(linenum, liquidstart);
+                                    endPos = new vscode.Position(linenum, x);
+                                    matchRange = new vscode.Range(startPos, endPos);
+                                    const diagnostic = new vscode.Diagnostic(matchRange, `Invalid type operation \`${match.groups.left}\` (${leftType}) and \`${match.groups.right}\` (${rightType})`, vscode.DiagnosticSeverity.Error);
                                     diagnostics.push(diagnostic);
                                 }
                             }
 
-                            tagcount++;
+                            if (match.groups?.if === "if") {
+                                tagcount++;
+                            }
                         }
                         
                     // } else if (match = re_ifbool.exec(liquidtag)) { // If Bool
@@ -390,8 +379,7 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
                         }
                         tagcount--;
                         nestEnd = matchRange;
-                        if (!nestedDecorations[tagcount]) { nestedDecorations[tagcount] = []; }
-                        nestedDecorations[tagcount].push({ range: matchRange });
+                        ifTagDecorations.push({range: matchRange});
 
                     } else if (match = re_block.exec(liquidtag)) { // Block
                         if (match[1] && match[2]) {
@@ -405,8 +393,12 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
                         endPos = new vscode.Position(linenum, x);
                         matchRange = new vscode.Range(startPos, endPos);
                         liquidTagDecorations.push({ range: matchRange });
-                    }
-                    else {
+                    } else if (re_else.test(liquidtag)) { // Else
+                        startPos = new vscode.Position(linenum, liquidstart);
+                        endPos = new vscode.Position(linenum, x);
+                        matchRange = new vscode.Range(startPos, endPos);
+                        liquidTagDecorations.push({ range: matchRange });
+                    } else {
                         startPos = new vscode.Position(linenum, liquidstart);
                         endPos = new vscode.Position(linenum, x);
                         matchRange = new vscode.Range(startPos, endPos);
@@ -470,10 +462,7 @@ function lintDocument(collection: vscode.DiagnosticCollection) {
     editor.setDecorations(objDecor, objDecorations);
 
     editor.setDecorations(htmlTagDecor, htmlDecorations);
-    for (const key in nestedDecorations) {
-        const decorations = nestedDecorations[key];
-        editor.setDecorations(nestingDecors[key], decorations);
-    }
+    editor.setDecorations(ifTagDecor, ifTagDecorations);
 
     collection.set(document.uri, diagnostics);
 }
